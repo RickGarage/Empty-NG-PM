@@ -533,6 +533,9 @@ class PluginManager{
 	}
 
 	public function tickSchedulers(int $currentTick) : void{
+		if(count($this->enabledPlugins) === 0){
+			return;
+		}
 		foreach(Utils::promoteKeys($this->enabledPlugins) as $pluginName => $p){
 			if(isset($this->enabledPlugins[$pluginName])){
 				//the plugin may have been disabled as a result of updating other plugins' schedulers, and therefore

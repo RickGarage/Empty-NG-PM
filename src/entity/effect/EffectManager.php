@@ -82,6 +82,9 @@ class EffectManager extends EffectCollection{
 	}
 
 	public function tick(int $tickDiff = 1) : bool{
+		if(count($this->effects) === 0){
+			return false;
+		}
 		foreach($this->effects as $instance){
 			$type = $instance->getType();
 			if($type->canTick($instance)){

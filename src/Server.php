@@ -1957,9 +1957,11 @@ class Server{
 			$this->currentTPS = self::TARGET_TICKS_PER_SECOND;
 			$this->currentUse = 0;
 
-			$queryRegenerateEvent = new QueryRegenerateEvent(new QueryInfo($this));
-			$queryRegenerateEvent->call();
-			$this->queryInfo = $queryRegenerateEvent->getQueryInfo();
+			if($this->configGroup->getConfigBool(ServerProperties::ENABLE_QUERY, true)){
+				$queryRegenerateEvent = new QueryRegenerateEvent(new QueryInfo($this));
+				$queryRegenerateEvent->call();
+				$this->queryInfo = $queryRegenerateEvent->getQueryInfo();
+			}
 
 			$this->network->updateName();
 			$this->network->getBandwidthTracker()->rotateAverageHistory();

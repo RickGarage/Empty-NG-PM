@@ -714,7 +714,8 @@ class World implements ChunkManager{
 	 * @param Player[]|null $players
 	 */
 	public function addSound(Vector3 $pos, Sound $sound, ?array $players = null) : void{
-		$players ??= $this->getViewersForPosition($pos);
+		$defaultViewers = $this->getViewersForPosition($pos);
+		$players ??= $defaultViewers;
 
 		if(WorldSoundEvent::hasHandlers()){
 			$ev = new WorldSoundEvent($this, $sound, $pos, $players);
@@ -725,6 +726,10 @@ class World implements ChunkManager{
 
 			$sound = $ev->getSound();
 			$players = $ev->getRecipients();
+		}
+
+		if(count($players) === 0){
+			return;
 		}
 
 		if(($blockSound = ($sound instanceof BlockSound)) || $sound instanceof ProtocolSound){
@@ -741,7 +746,7 @@ class World implements ChunkManager{
 				};
 			}
 
-			if($players === $this->getViewersForPosition($pos)){
+			if($players === $defaultViewers){
 				$this->broadcastPacketToViewersByTypeConverter($pos, $closure);
 			}else{
 				TypeConverter::broadcastByTypeConverter($this->filterViewersForPosition($pos, $players), $closure);
@@ -749,7 +754,7 @@ class World implements ChunkManager{
 		}else{
 			$pk = $sound->encode($pos);
 			if(count($pk) > 0){
-				if($players === $this->getViewersForPosition($pos)){
+				if($players === $defaultViewers){
 					foreach($pk as $e){
 						$this->broadcastPacketToViewers($pos, $e);
 					}
@@ -764,7 +769,8 @@ class World implements ChunkManager{
 	 * @param Player[]|null $players
 	 */
 	public function addParticle(Vector3 $pos, Particle $particle, ?array $players = null) : void{
-		$players ??= $this->getViewersForPosition($pos);
+		$defaultViewers = $this->getViewersForPosition($pos);
+		$players ??= $defaultViewers;
 
 		if(WorldParticleEvent::hasHandlers()){
 			$ev = new WorldParticleEvent($this, $particle, $pos, $players);
@@ -775,6 +781,10 @@ class World implements ChunkManager{
 
 			$particle = $ev->getParticle();
 			$players = $ev->getRecipients();
+		}
+
+		if(count($players) === 0){
+			return;
 		}
 
 		if($particle instanceof BlockParticle || $particle instanceof ItemParticle || $particle instanceof ProtocolParticle){
@@ -790,7 +800,7 @@ class World implements ChunkManager{
 				return $particle->encode($pos);
 			};
 
-			if($players === $this->getViewersForPosition($pos)){
+			if($players === $defaultViewers){
 				$this->broadcastPacketToViewersByTypeConverter($pos, $closure);
 			}else{
 				TypeConverter::broadcastByTypeConverter($this->filterViewersForPosition($pos, $players), $closure);
@@ -798,7 +808,7 @@ class World implements ChunkManager{
 		}else{
 			$pk = $particle->encode($pos);
 			if(count($pk) > 0){
-				if($players === $this->getViewersForPosition($pos)){
+				if($players === $defaultViewers){
 					foreach($pk as $e){
 						$this->broadcastPacketToViewers($pos, $e);
 					}
@@ -1025,7 +1035,9 @@ class World implements ChunkManager{
 		$this->skyLightReduction = $this->computeSkyLightReduction(); //Sky light reduction depends on the sun angle
 
 		if(++$this->sendTimeTicker === 200){
-			$this->sendTime();
+			if(count($this->players) > 0){
+				$this->sendTime();
+			}
 			$this->sendTimeTicker = 0;
 		}
 
