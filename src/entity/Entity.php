@@ -650,10 +650,12 @@ abstract class Entity{
 			}
 		}
 
-		$changedProperties = $this->getDirtyNetworkData();
-		if(count($changedProperties) > 0){
-			$this->sendData(null, $changedProperties);
-			$this->networkProperties->clearDirtyProperties();
+		if($this->networkPropertiesDirty){
+			$changedProperties = $this->getDirtyNetworkData();
+			if(count($changedProperties) > 0){
+				$this->sendData(null, $changedProperties);
+				$this->networkProperties->clearDirtyProperties();
+			}
 		}
 
 		$hasUpdate = false;
@@ -1014,14 +1016,22 @@ abstract class Entity{
 		if($this->hasMovementUpdate()){
 			$this->tryChangeMovement();
 
-			$this->motion = $this->motion->withComponents(
-				abs($this->motion->x) <= self::MOTION_THRESHOLD ? 0 : null,
-				abs($this->motion->y) <= self::MOTION_THRESHOLD ? 0 : null,
-				abs($this->motion->z) <= self::MOTION_THRESHOLD ? 0 : null
-			);
+			$origX = $this->motion->x;
+			$origY = $this->motion->y;
+			$origZ = $this->motion->z;
+			$mX = abs($origX) <= self::MOTION_THRESHOLD ? 0 : $origX;
+			$mY = abs($origY) <= self::MOTION_THRESHOLD ? 0 : $origY;
+			$mZ = abs($origZ) <= self::MOTION_THRESHOLD ? 0 : $origZ;
+			if($mX !== $origX || $mY !== $origY || $mZ !== $origZ){
+				$this->motion = $this->motion->withComponents(
+					$mX !== $origX ? $mX : null,
+					$mY !== $origY ? $mY : null,
+					$mZ !== $origZ ? $mZ : null
+				);
+			}
 
-			if(floatval($this->motion->x) !== 0.0 || floatval($this->motion->y) !== 0.0 || floatval($this->motion->z) !== 0.0){
-				$this->move($this->motion->x, $this->motion->y, $this->motion->z);
+			if($mX !== 0.0 || $mY !== 0.0 || $mZ !== 0.0){
+				$this->move($mX, $mY, $mZ);
 			}
 
 			$this->forceMovementUpdate = false;

@@ -1068,8 +1068,14 @@ class World implements ChunkManager{
 					continue;
 				}
 			}
-			foreach($this->getNearbyEntities(AxisAlignedBB::one()->offset($x, $y, $z)) as $entity){
-				$entity->onNearbyBlockChange();
+			$blockChunkX = $x >> Chunk::COORD_BIT_SIZE;
+			$blockChunkZ = $z >> Chunk::COORD_BIT_SIZE;
+			for($cx = -1; $cx <= 1; ++$cx){
+				for($cz = -1; $cz <= 1; ++$cz){
+					foreach($this->entitiesByChunk[World::chunkHash($blockChunkX + $cx, $blockChunkZ + $cz)] ?? [] as $entity){
+						$entity->onNearbyBlockChange();
+					}
+				}
 			}
 			$block->onNearbyBlockChange();
 		}
@@ -1127,9 +1133,13 @@ class World implements ChunkManager{
 		foreach($this->packetBuffersByChunkTypeConverter as $index => $entries){
 			World::getXZ($index, $chunkX, $chunkZ);
 			TypeConverter::broadcastByTypeConverter($this->getChunkPlayers($chunkX, $chunkZ), function(TypeConverter $typeConverter) use ($index, $entries) : array{
-				return array_merge($this->packetBuffersByChunk[$index] ?? [], ...array_map(function(\Closure $closure) use ($typeConverter) : array{
-					return $closure($typeConverter);
-				}, $entries));
+				$result = $this->packetBuffersByChunk[$index] ?? [];
+				foreach($entries as $closure){
+					foreach($closure($typeConverter) as $packet){
+						$result[] = $packet;
+					}
+				}
+				return $result;
 			});
 
 			unset($this->packetBuffersByChunk[$index]);
@@ -1235,14 +1245,16 @@ class World implements ChunkManager{
 			$this->blockCacheSize = 0;
 			$this->blockCollisionBoxCache = [];
 		}else{
-			//Recalculate this when we're asked - blockCacheSize may be higher than the real size
-			$this->blockCacheSize = 0;
-			foreach($this->blockCache as $list){
-				$this->blockCacheSize += count($list);
-				if($this->blockCacheSize > self::BLOCK_CACHE_SIZE_CAP){
-					$this->blockCache = [];
-					$this->blockCacheSize = 0;
-					break;
+			//Only recount if the tracked size suggests we might be over the cap
+			if($this->blockCacheSize > self::BLOCK_CACHE_SIZE_CAP){
+				$this->blockCacheSize = 0;
+				foreach($this->blockCache as $list){
+					$this->blockCacheSize += count($list);
+					if($this->blockCacheSize > self::BLOCK_CACHE_SIZE_CAP){
+						$this->blockCache = [];
+						$this->blockCacheSize = 0;
+						break;
+					}
 				}
 			}
 

@@ -128,7 +128,6 @@ use pocketmine\YmlServerProperties as Yml;
 use Ramsey\Uuid\UuidInterface;
 use Symfony\Component\Filesystem\Path;
 use function array_fill;
-use function array_sum;
 use function base64_encode;
 use function chr;
 use function cli_set_process_title;
@@ -251,6 +250,8 @@ class Server{
 	private array $useAverage;
 	private float $currentTPS = self::TARGET_TICKS_PER_SECOND;
 	private float $currentUse = 0;
+	private float $tickAverageSum;
+	private float $useAverageSum;
 	private float $startTime;
 
 	private bool $doTitleTick = true;
@@ -301,6 +302,18 @@ class Server{
 
 	/** @var Player[] */
 	private array $playerList = [];
+
+	/**
+	 * @var Player[] lowercase name => Player
+	 * @phpstan-var array<string, Player>
+	 */
+	private array $playerListByName = [];
+
+	/**
+	 * @var Player[] xuid => Player
+	 * @phpstan-var array<string, Player>
+	 */
+	private array $playerListByXuid = [];
 
 	private SignalHandler $signalHandler;
 
@@ -481,7 +494,7 @@ class Server{
 	 * Returns the last server TPS average measure
 	 */
 	public function getTicksPerSecondAverage() : float{
-		return round(array_sum($this->tickAverage) / count($this->tickAverage), 2);
+		return round($this->tickAverageSum / self::TARGET_TICKS_PER_SECOND, 2);
 	}
 
 	/**
@@ -495,7 +508,7 @@ class Server{
 	 * Returns the TPS usage/load average in %
 	 */
 	public function getTickUsageAverage() : float{
-		return round((array_sum($this->useAverage) / count($this->useAverage)) * 100, 2);
+		return round(($this->useAverageSum / self::TARGET_TICKS_PER_SECOND) * 100, 2);
 	}
 
 	public function getStartTime() : float{
@@ -673,27 +686,14 @@ class Server{
 	 * Returns an online player with the given name (case insensitive), or null if not found.
 	 */
 	public function getPlayerExact(string $name) : ?Player{
-		$name = strtolower($name);
-		foreach($this->getOnlinePlayers() as $player){
-			if(strtolower($player->getName()) === $name){
-				return $player;
-			}
-		}
-
-		return null;
+		return $this->playerListByName[strtolower($name)] ?? null;
 	}
 
 	/**
 	 * Returns an online player with the given xuid, or null if not found.
 	 */
 	public function getPlayerByXuid(string $xuid) : ?Player{
-		foreach($this->getOnlinePlayers() as $player){
-			if($player->getXuid() === $xuid){
-				return $player;
-			}
-		}
-
-		return null;
+		return $this->playerListByXuid[$xuid] ?? null;
 	}
 
 	/**
@@ -829,6 +829,8 @@ class Server{
 		$this->startTime = microtime(true);
 		$this->tickAverage = array_fill(0, self::TARGET_TICKS_PER_SECOND, self::TARGET_TICKS_PER_SECOND);
 		$this->useAverage = array_fill(0, self::TARGET_TICKS_PER_SECOND, 0);
+		$this->tickAverageSum = self::TARGET_TICKS_PER_SECOND * self::TARGET_TICKS_PER_SECOND;
+		$this->useAverageSum = 0;
 
 		Timings::init();
 		$this->tickSleeper = new TimeTrackingSleeperHandler(Timings::$serverInterrupts);
@@ -1843,6 +1845,10 @@ class Server{
 		}
 		$rawUUID = $player->getUniqueId()->getBytes();
 		$this->playerList[$rawUUID] = $player;
+		$this->playerListByName[strtolower($player->getName())] = $player;
+		if($player->getXuid() !== ""){
+			$this->playerListByXuid[$player->getXuid()] = $player;
+		}
 
 		if($this->sendUsageTicker > 0){
 			$this->uniquePlayers[$rawUUID] = $rawUUID;
@@ -1854,6 +1860,10 @@ class Server{
 	public function removeOnlinePlayer(Player $player) : void{
 		if(isset($this->playerList[$rawUUID = $player->getUniqueId()->getBytes()])){
 			unset($this->playerList[$rawUUID]);
+			unset($this->playerListByName[strtolower($player->getName())]);
+			if($player->getXuid() !== ""){
+				unset($this->playerListByXuid[$player->getXuid()]);
+			}
 			foreach($this->playerList as $p){
 				$p->getNetworkSession()->onPlayerRemoved($player);
 			}
@@ -1991,8 +2001,12 @@ class Server{
 		TimingsHandler::tick($this->currentTPS <= $this->profilingTickRate);
 
 		$idx = $this->tickCounter % self::TARGET_TICKS_PER_SECOND;
+		$this->tickAverageSum -= $this->tickAverage[$idx];
+		$this->useAverageSum -= $this->useAverage[$idx];
 		$this->tickAverage[$idx] = $this->currentTPS;
 		$this->useAverage[$idx] = $this->currentUse;
+		$this->tickAverageSum += $this->currentTPS;
+		$this->useAverageSum += $this->currentUse;
 		$this->tickSleeper->resetNotificationProcessingTime();
 
 		if(($this->nextTick - $tickTime) < -1){
