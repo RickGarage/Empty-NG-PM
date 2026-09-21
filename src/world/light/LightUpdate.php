@@ -137,9 +137,10 @@ abstract class LightUpdate{
 		while(!$context->spreadQueue->isEmpty()){
 			$touched++;
 			[$x, $y, $z] = $context->spreadQueue->dequeue();
-			$from = $context->spreadVisited[World::blockHash($x, $y, $z)];
+			$index = World::blockHash($x, $y, $z);
+			$from = $context->spreadVisited[$index];
 
-			unset($context->spreadVisited[World::blockHash($x, $y, $z)]);
+			unset($context->spreadVisited[$index]);
 
 			$moveStatus = $subChunkExplorer->moveTo($x, $y, $z);
 			if($moveStatus === SubChunkExplorerStatus::INVALID){
