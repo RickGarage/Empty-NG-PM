@@ -26,6 +26,7 @@ namespace pocketmine\network\mcpe;
 use pocketmine\network\mcpe\protocol\ClientboundPacket;
 use pocketmine\player\Player;
 use pocketmine\timings\Timings;
+use pocketmine\timings\TimingsHandler;
 use function count;
 use function spl_object_id;
 
@@ -44,33 +45,42 @@ final class NetworkBroadcastUtils{
 			throw new \InvalidArgumentException("Cannot broadcast empty list of packets");
 		}
 
-		return Timings::$broadcastPackets->time(function() use ($recipients, $packets) : bool{
-			/** @var NetworkSession[] $sessions */
-			$sessions = [];
-			foreach($recipients as $player){
-				if($player->isConnected()){
-					$sessions[] = $player->getNetworkSession();
-				}
-			}
-			if(count($sessions) === 0){
-				return false;
-			}
+		if(!TimingsHandler::isEnabled()){
+			return self::broadcastPacketsInternal($recipients, $packets);
+		}
+		return Timings::$broadcastPackets->time(fn() : bool => self::broadcastPacketsInternal($recipients, $packets));
+	}
 
-			/** @var PacketBroadcaster[] $uniqueBroadcasters */
-			$uniqueBroadcasters = [];
-			/** @var NetworkSession[][] $broadcasterTargets */
-			$broadcasterTargets = [];
-			foreach($sessions as $recipient){
-				$broadcaster = $recipient->getBroadcaster();
-				$uniqueBroadcasters[spl_object_id($broadcaster)] = $broadcaster;
-				$broadcasterTargets[spl_object_id($broadcaster)][spl_object_id($recipient)] = $recipient;
+	/**
+	 * @param Player[]            $recipients
+	 * @param ClientboundPacket[] $packets
+	 */
+	private static function broadcastPacketsInternal(array $recipients, array $packets) : bool{
+		/** @var NetworkSession[] $sessions */
+		$sessions = [];
+		foreach($recipients as $player){
+			if($player->isConnected()){
+				$sessions[] = $player->getNetworkSession();
 			}
-			foreach($uniqueBroadcasters as $broadcaster){
-				$broadcaster->broadcastPackets($broadcasterTargets[spl_object_id($broadcaster)], $packets);
-			}
+		}
+		if(count($sessions) === 0){
+			return false;
+		}
 
-			return true;
-		});
+		/** @var PacketBroadcaster[] $uniqueBroadcasters */
+		$uniqueBroadcasters = [];
+		/** @var NetworkSession[][] $broadcasterTargets */
+		$broadcasterTargets = [];
+		foreach($sessions as $recipient){
+			$broadcaster = $recipient->getBroadcaster();
+			$uniqueBroadcasters[spl_object_id($broadcaster)] = $broadcaster;
+			$broadcasterTargets[spl_object_id($broadcaster)][spl_object_id($recipient)] = $recipient;
+		}
+		foreach($uniqueBroadcasters as $broadcaster){
+			$broadcaster->broadcastPackets($broadcasterTargets[spl_object_id($broadcaster)], $packets);
+		}
+
+		return true;
 	}
 
 	/**

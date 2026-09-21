@@ -124,16 +124,6 @@ abstract class Living extends Entity{
 	protected int $breathTicks = self::DEFAULT_BREATH_TICKS;
 	protected int $maxBreathTicks = self::DEFAULT_BREATH_TICKS;
 
-	/**
-	 * Whether the given item class overrides Item::onTickWorn(), indexed by class name.
-	 * Used to skip useless per-tick clone + virtual call overhead for the vast majority of
-	 * armor items which never do anything when worn.
-	 *
-	 * @var array<string, bool>
-	 * @phpstan-var array<class-string<Item>, bool>
-	 */
-	private static array $tickWornOverrideCache = [];
-
 	protected Attribute $healthAttr;
 	protected Attribute $absorptionAttr;
 	protected Attribute $knockbackResistanceAttr;
@@ -698,18 +688,8 @@ abstract class Living extends Entity{
 				$hasUpdate = true;
 			}
 
-			foreach($this->armorInventory->getContents() as $index => $item){
-				$class = $item::class;
-				if(!(self::$tickWornOverrideCache[$class] ??= (new \ReflectionMethod($class, "onTickWorn"))->getDeclaringClass()->getName() !== Item::class)){
-					continue;
-				}
-				$oldItem = clone $item;
-				if($item->onTickWorn($this)){
-					$hasUpdate = true;
-					if(!$item->equalsExact($oldItem)){
-						$this->armorInventory->setItem($index, $item);
-					}
-				}
+			if($this->armorInventory->tickWornItems($this)){
+				$hasUpdate = true;
 			}
 		}
 

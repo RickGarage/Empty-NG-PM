@@ -49,6 +49,44 @@ class ArmorInventory extends SimpleInventory{
 		return $this->holder;
 	}
 
+	/**
+	 * Whether the given item class overrides Item::onTickWorn(), indexed by class name.
+	 * Used to skip useless per-tick clone overhead for the vast majority of armor
+	 * items which never do anything when worn.
+	 *
+	 * @var array<string, bool>
+	 * @phpstan-var array<class-string<Item>, bool>
+	 */
+	private static array $tickWornOverrideCache = [];
+
+	/**
+	 * Ticks all worn armor items which need per-tick processing.
+	 * Operates directly on internal slots to avoid cloning items that will never tick.
+	 *
+	 * @return bool whether any item did something that requires an entity update
+	 */
+	public function tickWornItems(Living $holder) : bool{
+		$hasUpdate = false;
+		foreach($this->slots as $index => $item){
+			if($item === null){
+				continue;
+			}
+			$class = $item::class;
+			if(!(self::$tickWornOverrideCache[$class] ??= (new \ReflectionMethod($class, "onTickWorn"))->getDeclaringClass()->getName() !== Item::class)){
+				continue;
+			}
+			$oldItem = clone $item;
+			$itemCopy = clone $item;
+			if($itemCopy->onTickWorn($holder)){
+				$hasUpdate = true;
+				if(!$itemCopy->equalsExact($oldItem)){
+					$this->setItem($index, $itemCopy);
+				}
+			}
+		}
+		return $hasUpdate;
+	}
+
 	public function getHelmet() : Item{
 		return $this->getItem(self::SLOT_HEAD);
 	}
