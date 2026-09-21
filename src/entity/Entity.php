@@ -776,7 +776,8 @@ abstract class Entity{
 		$diffPosition = $this->location->distanceSquared($this->lastLocation);
 		$diffRotation = ($this->location->yaw - $this->lastLocation->yaw) ** 2 + ($this->location->pitch - $this->lastLocation->pitch) ** 2;
 
-		$diffMotion = $this->motion->subtractVector($this->lastMotion)->lengthSquared();
+		//inlined subtractVector()->lengthSquared() to avoid allocating a Vector3 on every tick
+		$diffMotion = (($this->motion->x - $this->lastMotion->x) ** 2) + (($this->motion->y - $this->lastMotion->y) ** 2) + (($this->motion->z - $this->lastMotion->z) ** 2);
 
 		$still = $this->motion->lengthSquared() === 0.0;
 		$wasStill = $this->lastMotion->lengthSquared() === 0.0;

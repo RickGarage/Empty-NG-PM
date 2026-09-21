@@ -207,11 +207,21 @@ class ExperienceOrb extends Entity{
 		$this->setTargetPlayer($currentTarget);
 
 		if($currentTarget !== null){
-			$vector = $currentTarget->getPosition()->add(0, $currentTarget->getEyeHeight() / 2, 0)->subtractVector($this->location)->divide(self::MAX_TARGET_DISTANCE);
+			//scalar math equivalent of the vector chain below, without the intermediate allocations
+			$targetPos = $currentTarget->getPosition();
+			$dx = ($targetPos->x - $this->location->x) / self::MAX_TARGET_DISTANCE;
+			$dy = (($targetPos->y + $currentTarget->getEyeHeight() / 2) - $this->location->y) / self::MAX_TARGET_DISTANCE;
+			$dz = ($targetPos->z - $this->location->z) / self::MAX_TARGET_DISTANCE;
 
-			$distance = $vector->lengthSquared();
-			if($distance < 1){
-				$this->motion = $this->motion->addVector($vector->normalize()->multiply(0.2 * (1 - sqrt($distance)) ** 2));
+			$distance = ($dx ** 2) + ($dy ** 2) + ($dz ** 2);
+			if($distance < 1 && $distance > 0){
+				$len = sqrt($distance);
+				$attraction = 0.2 * (1 - $len) ** 2 / $len;
+				$this->motion = $this->motion->withComponents(
+					$this->motion->x + $dx * $attraction,
+					$this->motion->y + $dy * $attraction,
+					$this->motion->z + $dz * $attraction
+				);
 			}
 
 			if($currentTarget->getXpManager()->canPickupXp() && $this->boundingBox->intersectsWith($currentTarget->getBoundingBox())){
