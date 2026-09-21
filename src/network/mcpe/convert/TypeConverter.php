@@ -394,12 +394,15 @@ class TypeConverter{
 		];
 	}
 
+	private static ?CallbackType $broadcastSignature = null;
+
 	/**
 	 * @param Player[] $players
 	 * @phpstan-param \Closure(TypeConverter) : ClientboundPacket[] $closure
 	 */
 	public static function broadcastByTypeConverter(array $players, \Closure $closure) : void{
-		Utils::validateCallableSignature(new CallbackType(
+		//The signature object is immutable - build it once instead of on every broadcast.
+		Utils::validateCallableSignature(self::$broadcastSignature ??= new CallbackType(
 			new ReturnType(BuiltInTypes::ARRAY, ReturnType::COVARIANT),
 			new ParameterType('typeConverter', TypeConverter::class),
 		), $closure);

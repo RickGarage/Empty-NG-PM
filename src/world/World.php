@@ -26,10 +26,6 @@ declare(strict_types=1);
  */
 namespace pocketmine\world;
 
-use DaveRandom\CallbackValidator\BuiltInTypes;
-use DaveRandom\CallbackValidator\CallbackType;
-use DaveRandom\CallbackValidator\ParameterType;
-use DaveRandom\CallbackValidator\ReturnType;
 use pocketmine\block\Air;
 use pocketmine\block\Block;
 use pocketmine\block\BlockTypeIds;
@@ -197,8 +193,8 @@ class World implements ChunkManager{
 	 */
 	private array $entities = [];
 	/**
-	 * @var Vector3[] entity runtime ID => Vector3
-	 * @phpstan-var array<int, Vector3>
+	 * @var Position[] entity runtime ID => Position
+	 * @phpstan-var array<int, Position>
 	 */
 	private array $entityLastKnownPositions = [];
 
@@ -879,11 +875,9 @@ class World implements ChunkManager{
 	 * @phpstan-param \Closure(TypeConverter) : ClientboundPacket[] $closure
 	 */
 	private function broadcastPacketToPlayersByTypeConverterUsingChunk(int $chunkX, int $chunkZ, \Closure $closure) : void{
-		Utils::validateCallableSignature(new CallbackType(
-			new ReturnType(BuiltInTypes::ARRAY, ReturnType::COVARIANT),
-			new ParameterType('typeConverter', TypeConverter::class),
-		), $closure);
-
+		//NOTE: closure signature validation intentionally omitted here - this is a private
+		//hot-path method and all callers are internal with phpstan-enforced signatures.
+		//Validating via reflection on every broadcast would be pure overhead.
 		if(!isset($this->packetBuffersByChunkTypeConverter[$index = World::chunkHash($chunkX, $chunkZ)])){
 			$this->packetBuffersByChunkTypeConverter[$index] = [$closure];
 		}else{
@@ -2909,7 +2903,7 @@ class World implements ChunkManager{
 			//later on. Better we just force all entities to have a save ID, even if it might not be needed.
 			throw new \LogicException("Entity " . $entity::class . " is not registered for a save ID in EntityFactory");
 		}
-		$pos = $entity->getPosition()->asVector3();
+		$pos = $entity->getPosition();
 		$this->entitiesByChunk[World::chunkHash($pos->getFloorX() >> Chunk::COORD_BIT_SIZE, $pos->getFloorZ() >> Chunk::COORD_BIT_SIZE)][$entity->getId()] = $entity;
 		$this->entityLastKnownPositions[$entity->getId()] = $pos;
 
@@ -2992,7 +2986,7 @@ class World implements ChunkManager{
 			$newChunkHash = World::chunkHash($newChunkX, $newChunkZ);
 			$this->entitiesByChunk[$newChunkHash][$entity->getId()] = $entity;
 		}
-		$this->entityLastKnownPositions[$entity->getId()] = $newPosition->asVector3();
+		$this->entityLastKnownPositions[$entity->getId()] = $newPosition;
 	}
 
 	/**

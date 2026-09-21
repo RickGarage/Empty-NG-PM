@@ -1425,13 +1425,13 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$this->moveRateLimit = min(self::MOVE_BACKLOG_SIZE, max(0, $this->moveRateLimit) + self::MOVES_PER_TICK * $multiplier);
 		$this->lastMovementProcess = $now;
 
-		$from = clone $this->lastLocation;
-		$to = clone $this->location;
-
-		$delta = $to->distanceSquared($from);
-		$deltaAngle = abs($this->lastLocation->yaw - $to->yaw) + abs($this->lastLocation->pitch - $to->pitch);
+		$delta = $this->location->distanceSquared($this->lastLocation);
+		$deltaAngle = abs($this->lastLocation->yaw - $this->location->yaw) + abs($this->lastLocation->pitch - $this->location->pitch);
 
 		if($delta > 0.0001 || $deltaAngle > 1.0){
+			$from = clone $this->lastLocation;
+			$to = clone $this->location;
+
 			if(PlayerMoveEvent::hasHandlers()){
 				$ev = new PlayerMoveEvent($this, $from, $to);
 

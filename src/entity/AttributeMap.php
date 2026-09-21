@@ -23,8 +23,6 @@ declare(strict_types=1);
 
 namespace pocketmine\entity;
 
-use function array_filter;
-
 class AttributeMap{
 	/** @var Attribute[] */
 	private array $attributes = [];
@@ -48,8 +46,12 @@ class AttributeMap{
 	 * @return Attribute[]
 	 */
 	public function needSend() : array{
-		return array_filter($this->attributes, function(Attribute $attribute) : bool{
-			return $attribute->isSyncable() && $attribute->isDesynchronized();
-		});
+		$result = [];
+		foreach($this->attributes as $attribute){
+			if($attribute->isSyncable() && $attribute->isDesynchronized()){
+				$result[] = $attribute;
+			}
+		}
+		return $result;
 	}
 }
