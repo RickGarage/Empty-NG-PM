@@ -65,6 +65,7 @@ use pocketmine\network\mcpe\protocol\types\GameMode;
 use pocketmine\network\mcpe\protocol\types\inventory\ItemStackWrapper;
 use pocketmine\network\mcpe\protocol\types\PlayerListEntry;
 use pocketmine\network\mcpe\protocol\types\PlayerPermissions;
+use pocketmine\network\mcpe\protocol\types\skin\SkinData;
 use pocketmine\network\mcpe\protocol\UpdateAbilitiesPacket;
 use pocketmine\player\Player;
 use pocketmine\world\sound\TotemUseSound;
@@ -108,6 +109,17 @@ class Human extends Living implements ProjectileSource, InventoryHolder{
 	protected UuidInterface $uuid;
 
 	protected Skin $skin;
+
+	/**
+	 * Converted skin data cached per protocol ID. Converting a skin involves
+	 * parsing the skin image and encoding JSON, so doing it on every player
+	 * list broadcast (e.g. every join sends every player's skin to everyone)
+	 * is a major burst cost with many players online.
+	 *
+	 * @var SkinData[]
+	 * @phpstan-var array<int, SkinData>
+	 */
+	private array $cachedSkinData = [];
 
 	protected HungerManager $hungerManager;
 	protected ExperienceManager $xpManager;
@@ -156,6 +168,16 @@ class Human extends Living implements ProjectileSource, InventoryHolder{
 	 */
 	public function setSkin(Skin $skin) : void{
 		$this->skin = $skin;
+		$this->cachedSkinData = [];
+	}
+
+	/**
+	 * Returns this human's skin converted for the given protocol, using a
+	 * cache since conversion is expensive and the same data is broadcast
+	 * to many players (player list, skins, spawns).
+	 */
+	public function getSkinData(TypeConverter $typeConverter) : SkinData{
+		return $this->cachedSkinData[$typeConverter->getProtocolId()] ??= $typeConverter->getSkinAdapter()->toSkinData($this->skin);
 	}
 
 	/**
@@ -167,7 +189,7 @@ class Human extends Living implements ProjectileSource, InventoryHolder{
 	public function sendSkin(?array $targets = null) : void{
 		TypeConverter::broadcastByTypeConverter($targets ?? $this->hasSpawned, function(TypeConverter $typeConverter) : array{
 			return [
-				PlayerSkinPacket::create($this->getUniqueId(), "", "", $typeConverter->getSkinAdapter()->toSkinData($this->skin))
+				PlayerSkinPacket::create($this->getUniqueId(), "", "", $this->getSkinData($typeConverter))
 			];
 		});
 	}
@@ -498,7 +520,7 @@ class Human extends Living implements ProjectileSource, InventoryHolder{
 		$networkSession = $player->getNetworkSession();
 		$typeConverter = $networkSession->getTypeConverter();
 		if(!($this instanceof Player)){
-			$networkSession->sendDataPacket(PlayerListPacket::add([PlayerListEntry::createAdditionEntry($this->uuid, $this->id, $this->getName(), $typeConverter->getSkinAdapter()->toSkinData($this->skin))]));
+			$networkSession->sendDataPacket(PlayerListPacket::add([PlayerListEntry::createAdditionEntry($this->uuid, $this->id, $this->getName(), $this->getSkinData($typeConverter))]));
 		}
 
 		$networkSession->sendDataPacket(AddPlayerPacket::create(
