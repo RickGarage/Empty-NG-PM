@@ -88,6 +88,10 @@ class LoginPacketHandler extends PacketHandler{
 	}
 
 	public function handleLogin(LoginPacket $packet) : bool{
+		if(($rejection = $this->server->getAntiBotManager()->checkLogin($this->session->getIp())) !== null){
+			$this->session->disconnect($rejection);
+			return true;
+		}
 		if($this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_21_93){
 			$authInfo = $this->parseAuthInfo($packet->authInfoJson);
 		}elseif($this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_21_90){

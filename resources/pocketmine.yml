@@ -83,6 +83,31 @@ network:
   #DO NOT DISABLE THIS unless you understand the risks involved.
   enable-encryption: true
 
+antibot:
+  #Protects the server against login floods and bot attacks, and smooths out
+  #legitimate login surges (e.g. many players reconnecting at once).
+  #Set any limit to 0 to disable it.
+  enabled: true
+  #Maximum simultaneous connections from a single IP address.
+  max-connections-per-ip: 5
+  #Maximum new connections from a single IP address per connection-rate-window seconds.
+  max-connection-attempts-per-ip: 30
+  connection-rate-window: 60
+  #Maximum login packets from a single IP address per login-rate-window seconds.
+  max-login-attempts-per-ip: 30
+  login-rate-window: 60
+  #Maximum login packets server-wide per second. Excess logins are asked to retry,
+  #which staggers login surges instead of letting them kill the tick rate.
+  max-logins-per-second: 20
+  #Maximum connections stuck in the login phase at once. Excess connections are rejected.
+  max-pending-logins: 100
+  #Rate limit violations remembered per IP before a temporary block. Set to 0 to never block.
+  max-violations: 3
+  #How long violations are remembered, in seconds.
+  violation-window: 600
+  #How long offending IPs are blocked, in seconds.
+  block-duration: 300
+
 debug:
   #If > 1, it will show debug messages in the console
   level: 1

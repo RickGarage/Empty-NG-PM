@@ -65,6 +65,7 @@ use pocketmine\network\mcpe\protocol\types\CompressionAlgorithm;
 use pocketmine\network\mcpe\raklib\RakLibInterface;
 use pocketmine\network\mcpe\StandardEntityEventBroadcaster;
 use pocketmine\network\mcpe\StandardPacketBroadcaster;
+use pocketmine\network\AntiBotManager;
 use pocketmine\network\Network;
 use pocketmine\network\NetworkInterfaceStartException;
 use pocketmine\network\query\DedicatedQueryNetworkInterface;
@@ -223,6 +224,8 @@ class Server{
 	private BanList $banByName;
 
 	private BanList $banByIP;
+
+	private AntiBotManager $antiBotManager;
 
 	private Config $operators;
 
@@ -734,6 +737,10 @@ class Server{
 		return $this->banByIP;
 	}
 
+	public function getAntiBotManager() : AntiBotManager{
+		return $this->antiBotManager;
+	}
+
 	public function addOp(string $name) : void{
 		$this->operators->set(strtolower($name), true);
 
@@ -1018,6 +1025,8 @@ class Server{
 			@touch($bannedIpsTxt);
 			$this->banByIP = new BanList($bannedIpsTxt);
 			$this->banByIP->load();
+
+			$this->antiBotManager = new AntiBotManager($this);
 
 			$this->maxPlayers = $this->configGroup->getConfigInt(ServerProperties::MAX_PLAYERS, self::DEFAULT_MAX_PLAYERS);
 

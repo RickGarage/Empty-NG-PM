@@ -184,6 +184,12 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onClientConnect(int $sessionId, string $address, int $port, int $clientID) : void{
+		$antiBot = $this->server->getAntiBotManager();
+		if(($rejection = $antiBot->checkConnection($address)) !== null){
+			$this->server->getLogger()->debug("Rejected connection from $address: $rejection");
+			$this->interface->closeSession($sessionId);
+			return;
+		}
 		$session = new NetworkSession(
 			$this->server,
 			$this->network->getSessionManager(),
@@ -196,6 +202,7 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 			$address,
 			$port
 		);
+		$antiBot->trackSession($session);
 		$this->sessions[$sessionId] = $session;
 	}
 
