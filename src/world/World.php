@@ -362,6 +362,24 @@ class World implements ChunkManager{
 
 	private bool $autoSave = true;
 
+	/**
+	 * Snapshots for an in-progress incremental autosave. Autosaves are spread
+	 * across many ticks so that saving large worlds or many players doesn't
+	 * freeze a single tick.
+	 *
+	 * @var Player[]|null
+	 * @phpstan-var list<Player>|null
+	 */
+	private ?array $incrementalSavePlayers = null;
+	private int $incrementalSavePlayerIndex = 0;
+	/**
+	 * @var int[]|null chunk hashes
+	 * @phpstan-var list<ChunkPosHash>|null
+	 */
+	private ?array $incrementalSaveChunks = null;
+	private int $incrementalSaveChunkIndex = 0;
+	private bool $incrementalSaveActive = false;
+
 	private int $sleepTicks = 0;
 
 	private int $chunkTickRadius;
@@ -642,6 +660,11 @@ class World implements ChunkManager{
 			$callback();
 		}
 		$this->unloadCallbacks = [];
+
+		//discard any in-progress incremental autosave snapshot (onUnload() below does a full save)
+		$this->incrementalSavePlayers = null;
+		$this->incrementalSaveChunks = null;
+		$this->incrementalSaveActive = false;
 
 		foreach($this->chunks as $chunkHash => $chunk){
 			self::getXZ($chunkHash, $chunkX, $chunkZ);
@@ -1556,21 +1579,107 @@ class World implements ChunkManager{
 	}
 
 	public function saveChunks() : void{
+		foreach($this->chunks as $chunkHash => $chunk){
+			self::getXZ($chunkHash, $chunkX, $chunkZ);
+			$this->saveSingleChunk($chunkX, $chunkZ, $chunk);
+		}
+	}
+
+	private function saveSingleChunk(int $chunkX, int $chunkZ, Chunk $chunk) : void{
 		$this->timings->syncChunkSave->startTiming();
 		try{
-			foreach($this->chunks as $chunkHash => $chunk){
-				self::getXZ($chunkHash, $chunkX, $chunkZ);
-				$this->provider->saveChunk($chunkX, $chunkZ, new ChunkData(
-					$chunk->getSubChunks(),
-					$chunk->isPopulated(),
-					array_map(fn(Entity $e) => $e->saveNBT(), array_values(array_filter($this->getChunkEntities($chunkX, $chunkZ), fn(Entity $e) => $e->canSaveWithChunk()))),
-					array_map(fn(Tile $t) => $t->saveNBT(), array_values($chunk->getTiles())),
-				), $chunk->getTerrainDirtyFlags());
-				$chunk->clearTerrainDirtyFlags();
+			$entityNBT = [];
+			foreach($this->getChunkEntities($chunkX, $chunkZ) as $entity){
+				if($entity->canSaveWithChunk()){
+					$entityNBT[] = $entity->saveNBT();
+				}
 			}
+			$tileNBT = [];
+			foreach($chunk->getTiles() as $tile){
+				$tileNBT[] = $tile->saveNBT();
+			}
+			$this->provider->saveChunk($chunkX, $chunkZ, new ChunkData(
+				$chunk->getSubChunks(),
+				$chunk->isPopulated(),
+				$entityNBT,
+				$tileNBT,
+			), $chunk->getTerrainDirtyFlags());
 		}finally{
 			$this->timings->syncChunkSave->stopTiming();
 		}
+		$chunk->clearTerrainDirtyFlags();
+	}
+
+	/**
+	 * Starts an incremental autosave: snapshots the current players and chunks
+	 * so that continueIncrementalSave() can persist them a few at a time on
+	 * subsequent ticks instead of freezing one tick.
+	 */
+	public function beginIncrementalSave() : void{
+		$this->incrementalSavePlayers = [];
+		$this->incrementalSavePlayerIndex = 0;
+		$this->incrementalSaveChunks = [];
+		$this->incrementalSaveChunkIndex = 0;
+		$this->incrementalSaveActive = false;
+		if(!$this->getAutoSave()){
+			return;
+		}
+
+		(new WorldSaveEvent($this))->call();
+
+		$this->provider->getWorldData()->setTime($this->time);
+		$this->incrementalSavePlayers = array_values($this->players);
+		$this->incrementalSaveChunks = array_keys($this->chunks);
+		$this->incrementalSaveActive = true;
+	}
+
+	/**
+	 * Persists a slice of the snapshot taken by beginIncrementalSave().
+	 *
+	 * @return bool true when the whole world has been saved
+	 */
+	public function continueIncrementalSave(int $maxPlayers, int $maxChunks) : bool{
+		if(!$this->incrementalSaveActive){
+			return true;
+		}
+		if($this->incrementalSavePlayers !== null){
+			$players = $this->incrementalSavePlayers;
+			$saved = 0;
+			$count = count($players);
+			while($saved < $maxPlayers && $this->incrementalSavePlayerIndex < $count){
+				$player = $players[$this->incrementalSavePlayerIndex++];
+				if($player->isConnected() && $player->spawned){
+					$player->save();
+					++$saved;
+				}
+			}
+			if($this->incrementalSavePlayerIndex >= $count){
+				$this->incrementalSavePlayers = null;
+			}
+		}
+		if($this->incrementalSaveChunks !== null){
+			$chunks = $this->incrementalSaveChunks;
+			$saved = 0;
+			$count = count($chunks);
+			while($saved < $maxChunks && $this->incrementalSaveChunkIndex < $count){
+				$chunkHash = $chunks[$this->incrementalSaveChunkIndex++];
+				if(isset($this->chunks[$chunkHash])){
+					self::getXZ($chunkHash, $chunkX, $chunkZ);
+					$this->saveSingleChunk($chunkX, $chunkZ, $this->chunks[$chunkHash]);
+					++$saved;
+				}
+			}
+			if($this->incrementalSaveChunkIndex >= $count){
+				$this->incrementalSaveChunks = null;
+			}
+		}
+
+		if($this->incrementalSavePlayers === null && $this->incrementalSaveChunks === null){
+			$this->incrementalSaveActive = false;
+			$this->provider->getWorldData()->save();
+			return true;
+		}
+		return false;
 	}
 
 	/**

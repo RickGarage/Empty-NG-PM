@@ -57,6 +57,14 @@ class WorldManager{
 	public const TICKS_PER_AUTOSAVE = 300 * Server::TARGET_TICKS_PER_SECOND;
 
 	/**
+	 * Maximum players and chunks persisted per world per tick while an
+	 * incremental autosave is draining. Keeps individual ticks fast even
+	 * with hundreds of players and thousands of loaded chunks.
+	 */
+	private const AUTOSAVE_PLAYERS_PER_TICK = 5;
+	private const AUTOSAVE_CHUNKS_PER_TICK = 8;
+
+	/**
 	 * @var World[]
 	 * @phpstan-var array<int, World>
 	 */
@@ -66,6 +74,14 @@ class WorldManager{
 	private bool $autoSave = true;
 	private int $autoSaveTicks = self::TICKS_PER_AUTOSAVE;
 	private int $autoSaveTicker = 0;
+	private float $autoSaveStartTime = 0.0;
+	/**
+	 * Worlds with an in-progress incremental autosave, world ID => World.
+	 *
+	 * @var World[]
+	 * @phpstan-var array<int, World>
+	 */
+	private array $pendingAutoSaveWorlds = [];
 
 	public function __construct(
 		private Server $server,
@@ -358,10 +374,44 @@ class WorldManager{
 
 		if($this->autoSave && ++$this->autoSaveTicker >= $this->autoSaveTicks){
 			$this->autoSaveTicker = 0;
-			$this->server->getLogger()->debug("[Auto Save] Saving worlds...");
-			$start = microtime(true);
-			$this->doAutoSave();
-			$time = microtime(true) - $start;
+			$this->startIncrementalAutoSave();
+		}
+		$this->continueIncrementalAutoSave();
+	}
+
+	private function startIncrementalAutoSave() : void{
+		if(count($this->pendingAutoSaveWorlds) > 0){
+			//previous cycle hasn't finished draining yet; don't pile another one on top
+			$this->server->getLogger()->debug("[Auto Save] Previous save still in progress, skipping new cycle");
+			return;
+		}
+		if(count($this->worlds) === 0){
+			return;
+		}
+		$this->server->getLogger()->debug("[Auto Save] Saving worlds...");
+		$this->autoSaveStartTime = microtime(true);
+		foreach($this->worlds as $world){
+			$world->beginIncrementalSave();
+			$this->pendingAutoSaveWorlds[$world->getId()] = $world;
+		}
+	}
+
+	private function continueIncrementalAutoSave() : void{
+		if(count($this->pendingAutoSaveWorlds) === 0){
+			return;
+		}
+		foreach($this->pendingAutoSaveWorlds as $id => $world){
+			if(!isset($this->worlds[$id])){
+				//world was unloaded mid-save (unloading does a full save itself)
+				unset($this->pendingAutoSaveWorlds[$id]);
+				continue;
+			}
+			if($world->continueIncrementalSave(self::AUTOSAVE_PLAYERS_PER_TICK, self::AUTOSAVE_CHUNKS_PER_TICK)){
+				unset($this->pendingAutoSaveWorlds[$id]);
+			}
+		}
+		if(count($this->pendingAutoSaveWorlds) === 0){
+			$time = microtime(true) - $this->autoSaveStartTime;
 			$this->server->getLogger()->debug("[Auto Save] Save completed in " . ($time >= 1 ? round($time, 3) . "s" : round($time * 1000) . "ms"));
 		}
 	}
@@ -391,14 +441,4 @@ class WorldManager{
 		$this->autoSaveTicks = $autoSaveTicks;
 	}
 
-	private function doAutoSave() : void{
-		foreach($this->worlds as $world){
-			foreach($world->getPlayers() as $player){
-				if($player->spawned){
-					$player->save();
-				}
-			}
-			$world->save(false);
-		}
-	}
 }
