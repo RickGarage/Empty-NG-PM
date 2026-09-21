@@ -128,6 +128,7 @@ use pocketmine\world\WorldManager;
 use pocketmine\YmlServerProperties as Yml;
 use Ramsey\Uuid\UuidInterface;
 use Symfony\Component\Filesystem\Path;
+use function array_chunk;
 use function array_fill;
 use function base64_encode;
 use function chr;
@@ -325,6 +326,28 @@ class Server{
 	 * @phpstan-var array<string, array<int, CommandSender>>
 	 */
 	private array $broadcastSubscribers = [];
+
+	/**
+	 * Recipients delivered to immediately when the broadcast backlog is empty.
+	 * Larger broadcasts are split into slices of this size and drained over ticks.
+	 */
+	private const MAX_BROADCAST_RECIPIENTS_IMMEDIATE = 50;
+	/**
+	 * Maximum broadcast slices delivered per tick while draining the backlog.
+	 */
+	private const MAX_BROADCAST_SLICES_PER_TICK = 2;
+	/**
+	 * Safety valve: if this many slices are already waiting, new broadcasts
+	 * are sent immediately instead of queueing forever.
+	 */
+	private const MAX_QUEUED_BROADCAST_SLICES = 100;
+
+	/**
+	 * Queued broadcast slices waiting to be delivered across ticks.
+	 *
+	 * @phpstan-var \SplQueue<\Closure() : void>
+	 */
+	private \SplQueue $broadcastQueue;
 
 	/** @var array<int, PacketBroadcaster> */
 	private array $packetBroadcasters = [];
@@ -1064,6 +1087,7 @@ class Server{
 			DefaultPermissions::registerCorePermissions();
 
 			$this->commandMap = new SimpleCommandMap($this);
+			$this->broadcastQueue = new \SplQueue();
 
 			$this->craftingManager = CraftingManagerFromDataHelper::make(BedrockDataFiles::RECIPES);
 
@@ -1403,16 +1427,64 @@ class Server{
 	}
 
 	/**
+	 * Sends to the given recipients, spreading large recipient lists across
+	 * multiple ticks so that mass broadcasts don't freeze a single tick.
+	 *
+	 * Small broadcasts with an empty backlog are still sent immediately, and
+	 * per-player ordering is preserved since slices always drain in order.
+	 *
+	 * @phpstan-template TRecipient of object
+	 * @phpstan-param array<int, TRecipient> $recipients
+	 * @phpstan-param \Closure(TRecipient) : void $send
+	 */
+	private function broadcastSliced(array $recipients, \Closure $send) : int{
+		$count = count($recipients);
+		if($count === 0){
+			return 0;
+		}
+		if(count($this->broadcastQueue) === 0 && $count <= self::MAX_BROADCAST_RECIPIENTS_IMMEDIATE){
+			foreach($recipients as $recipient){
+				$send($recipient);
+			}
+			return $count;
+		}
+		if(count($this->broadcastQueue) > self::MAX_QUEUED_BROADCAST_SLICES){
+			//pathological backlog - fall back to sending immediately rather than queueing forever
+			foreach($recipients as $recipient){
+				$send($recipient);
+			}
+			return $count;
+		}
+		foreach(array_chunk($recipients, self::MAX_BROADCAST_RECIPIENTS_IMMEDIATE) as $slice){
+			$this->broadcastQueue->enqueue(static function() use ($slice, $send) : void{
+				foreach($slice as $recipient){
+					$send($recipient);
+				}
+			});
+		}
+		return $count;
+	}
+
+	/**
+	 * Delivers queued broadcast slices. A null limit drains everything (used on shutdown).
+	 */
+	private function drainBroadcastQueue(?int $maxSlices = null) : void{
+		$slices = 0;
+		while(!$this->broadcastQueue->isEmpty() && ($maxSlices === null || $slices < $maxSlices)){
+			$this->broadcastQueue->dequeue()();
+			++$slices;
+		}
+	}
+
+	/**
 	 * @param CommandSender[]|null $recipients
 	 */
 	public function broadcastMessage(Translatable|string $message, ?array $recipients = null) : int{
-		$recipients = $recipients ?? $this->getBroadcastChannelSubscribers(self::BROADCAST_CHANNEL_USERS);
+		$recipients ??= $this->getBroadcastChannelSubscribers(self::BROADCAST_CHANNEL_USERS);
 
-		foreach($recipients as $recipient){
+		return $this->broadcastSliced($recipients, static function(CommandSender $recipient) use ($message) : void{
 			$recipient->sendMessage($message);
-		}
-
-		return count($recipients);
+		});
 	}
 
 	/**
@@ -1433,26 +1505,22 @@ class Server{
 	 * @param Player[]|null $recipients
 	 */
 	public function broadcastTip(string $tip, ?array $recipients = null) : int{
-		$recipients = $recipients ?? $this->getPlayerBroadcastSubscribers(self::BROADCAST_CHANNEL_USERS);
+		$recipients ??= $this->getPlayerBroadcastSubscribers(self::BROADCAST_CHANNEL_USERS);
 
-		foreach($recipients as $recipient){
+		return $this->broadcastSliced($recipients, static function(Player $recipient) use ($tip) : void{
 			$recipient->sendTip($tip);
-		}
-
-		return count($recipients);
+		});
 	}
 
 	/**
 	 * @param Player[]|null $recipients
 	 */
 	public function broadcastPopup(string $popup, ?array $recipients = null) : int{
-		$recipients = $recipients ?? $this->getPlayerBroadcastSubscribers(self::BROADCAST_CHANNEL_USERS);
+		$recipients ??= $this->getPlayerBroadcastSubscribers(self::BROADCAST_CHANNEL_USERS);
 
-		foreach($recipients as $recipient){
+		return $this->broadcastSliced($recipients, static function(Player $recipient) use ($popup) : void{
 			$recipient->sendPopup($popup);
-		}
-
-		return count($recipients);
+		});
 	}
 
 	/**
@@ -1462,13 +1530,11 @@ class Server{
 	 * @param Player[]|null $recipients
 	 */
 	public function broadcastTitle(string $title, string $subtitle = "", int $fadeIn = -1, int $stay = -1, int $fadeOut = -1, ?array $recipients = null) : int{
-		$recipients = $recipients ?? $this->getPlayerBroadcastSubscribers(self::BROADCAST_CHANNEL_USERS);
+		$recipients ??= $this->getPlayerBroadcastSubscribers(self::BROADCAST_CHANNEL_USERS);
 
-		foreach($recipients as $recipient){
+		return $this->broadcastSliced($recipients, static function(Player $recipient) use ($title, $subtitle, $fadeIn, $stay, $fadeOut) : void{
 			$recipient->sendTitle($title, $subtitle, $fadeIn, $stay, $fadeOut);
-		}
-
-		return count($recipients);
+		});
 	}
 
 	/**
@@ -1598,6 +1664,11 @@ class Server{
 			if(isset($this->pluginManager)){
 				$this->logger->debug("Disabling all plugins");
 				$this->pluginManager->disablePlugins();
+			}
+
+			//deliver anything left in the broadcast backlog before disconnecting everyone
+			if(isset($this->broadcastQueue)){
+				$this->drainBroadcastQueue();
 			}
 
 			if(isset($this->network)){
@@ -1992,6 +2063,8 @@ class Server{
 		}
 
 		$this->memoryManager->check();
+
+		$this->drainBroadcastQueue(self::MAX_BROADCAST_SLICES_PER_TICK);
 
 		if($this->console !== null){
 			Timings::$serverCommand->startTiming();
