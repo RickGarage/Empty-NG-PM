@@ -27,6 +27,7 @@ use pocketmine\network\mcpe\NetworkSession;
 use pocketmine\Server;
 use function count;
 use function microtime;
+use function trim;
 
 /**
  * Protects the server against login floods and bot attacks, and smooths out
@@ -35,6 +36,10 @@ use function microtime;
  * This enforces, per IP address, concurrent connection caps and sliding-window
  * connection/login rate limits, plus a server-wide login rate limit. Repeated
  * offenders are temporarily blocked at the network layer.
+ *
+ * Addresses listed under antibot.trusted-proxies (e.g. a local WaterDogPE
+ * proxy, through which all players share one IP) are exempt from per-IP
+ * limits, while still counting towards the server-wide limits.
  *
  * All bookkeeping is pruned lazily, so this manager needs no per-tick updates
  * and adds negligible overhead when no attack is happening.
@@ -57,6 +62,14 @@ class AntiBotManager{
 	private int $maxViolations;
 	private int $violationWindow;
 	private int $blockDuration;
+	/**
+	 * IPs exempt from per-IP limits (e.g. proxies like WaterDogPE, where all
+	 * players arrive from a single local address).
+	 *
+	 * @var array<string, true>
+	 * @phpstan-var array<string, true>
+	 */
+	private array $trustedProxies = [];
 
 	/**
 	 * @var \SplQueue[] IP => connection attempt timestamps (oldest first)
@@ -101,12 +114,27 @@ class AntiBotManager{
 		$this->maxViolations = $config->getPropertyInt("antibot.max-violations", 3);
 		$this->violationWindow = $config->getPropertyInt("antibot.violation-window", 600);
 		$this->blockDuration = $config->getPropertyInt("antibot.block-duration", 300);
+		foreach((array) $config->getProperty("antibot.trusted-proxies", ["127.0.0.1", "::1"]) as $proxyIp){
+			$proxyIp = trim((string) $proxyIp);
+			if($proxyIp !== ""){
+				$this->trustedProxies[$proxyIp] = true;
+			}
+		}
 
 		$this->globalLoginAttempts = new \SplQueue();
 	}
 
 	public function isEnabled() : bool{
 		return $this->enabled;
+	}
+
+	/**
+	 * Returns whether the given IP belongs to a trusted proxy. Trusted proxies
+	 * are exempt from per-IP limits, since many legitimate players may share
+	 * their address (e.g. WaterDogPE running on localhost).
+	 */
+	public function isTrustedProxy(string $ip) : bool{
+		return isset($this->trustedProxies[$ip]);
 	}
 
 	/**
@@ -126,6 +154,12 @@ class AntiBotManager{
 			if($manager->getSessionCount() - $manager->getValidSessionCount() >= $this->maxPendingLogins){
 				return "The server is currently busy. Please try again in a moment.";
 			}
+		}
+
+		//trusted proxies (e.g. WaterDogPE) funnel many legitimate players through
+		//a single address, so per-IP limits must not apply to them
+		if($this->isTrustedProxy($ip)){
+			return null;
 		}
 
 		if($this->maxConnectionsPerIp > 0 && ($this->activeConnections[$ip] ?? 0) >= $this->maxConnectionsPerIp){
@@ -167,6 +201,12 @@ class AntiBotManager{
 			$this->capQueue($this->globalLoginAttempts);
 		}
 
+		//trusted proxies (e.g. WaterDogPE) funnel many legitimate players through
+		//a single address, so per-IP limits must not apply to them
+		if($this->isTrustedProxy($ip)){
+			return null;
+		}
+
 		if($this->maxLoginAttemptsPerIp > 0){
 			$attempts = $this->loginAttempts[$ip] ??= new \SplQueue();
 			$this->pruneQueue($attempts, $now - $this->loginRateWindow);
@@ -190,6 +230,9 @@ class AntiBotManager{
 			return;
 		}
 		$ip = $session->getIp();
+		if($this->isTrustedProxy($ip)){
+			return;
+		}
 		$this->activeConnections[$ip] = ($this->activeConnections[$ip] ?? 0) + 1;
 		$session->getDisposeHooks()->add(function() use ($ip) : void{
 			if(isset($this->activeConnections[$ip]) && --$this->activeConnections[$ip] <= 0){

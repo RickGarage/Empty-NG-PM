@@ -107,6 +107,13 @@ antibot:
   violation-window: 600
   #How long offending IPs are blocked, in seconds.
   block-duration: 300
+  #IPs exempt from per-IP limits. REQUIRED if you run behind a proxy such as
+  #WaterDogPE, where every player connects from the proxy's address (usually
+  #a local IP) - otherwise legitimate players will be rejected as floods.
+  #Add your proxy's IP here if it is not on localhost.
+  trusted-proxies:
+    - "127.0.0.1"
+    - "::1"
 
 debug:
   #If > 1, it will show debug messages in the console
