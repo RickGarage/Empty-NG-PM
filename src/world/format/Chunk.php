@@ -58,6 +58,16 @@ class Chunk{
 	protected \SplFixedArray $subChunks;
 
 	/**
+	 * Cached array view of $subChunks. getSubChunks() is called in hot paths
+	 * (world ticking, chunk serialization, saving), so avoid rebuilding this
+	 * array on every call. Invalidated whenever a subchunk is replaced.
+	 *
+	 * @var SubChunk[]|null
+	 * @phpstan-var array<int, SubChunk>|null
+	 */
+	private ?array $subChunksArrayCache = null;
+
+	/**
 	 * @var Tile[]
 	 * @phpstan-var array<int, Tile>
 	 */
@@ -299,6 +309,7 @@ class Chunk{
 		}
 
 		$this->subChunks[$y - self::MIN_SUBCHUNK_INDEX] = $subChunk ?? new SubChunk(Block::EMPTY_STATE_ID, [], new PalettedBlockArray(BiomeIds::OCEAN));
+		$this->subChunksArrayCache = null;
 		$this->terrainDirtyFlags |= self::DIRTY_FLAG_BLOCKS;
 	}
 
@@ -307,6 +318,14 @@ class Chunk{
 	 * @phpstan-return array<int, SubChunk>
 	 */
 	public function getSubChunks() : array{
+		return $this->subChunksArrayCache ??= $this->buildSubChunksArray();
+	}
+
+	/**
+	 * @return SubChunk[]
+	 * @phpstan-return array<int, SubChunk>
+	 */
+	private function buildSubChunksArray() : array{
 		$result = [];
 		foreach($this->subChunks as $yOffset => $subChunk){
 			$result[$yOffset + self::MIN_SUBCHUNK_INDEX] = $subChunk;
@@ -328,6 +347,7 @@ class Chunk{
 		$this->subChunks = \SplFixedArray::fromArray(array_map(function(SubChunk $subChunk) : SubChunk{
 			return clone $subChunk;
 		}, $this->subChunks->toArray()));
+		$this->subChunksArrayCache = null;
 		$this->heightMap = clone $this->heightMap;
 	}
 
