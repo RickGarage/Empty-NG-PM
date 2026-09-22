@@ -426,6 +426,15 @@ class Server{
 	}
 
 	/**
+	 * Returns the simulation distance from server.properties.
+	 * This controls the radius of chunks around each player that will be ticked.
+	 * Uses the server.properties value, overridable by pocketmine.yml chunk-ticking.tick-radius.
+	 */
+	public function getSimulationDistance() : int{
+		return max(0, $this->configGroup->getConfigInt(ServerProperties::SIMULATION_DISTANCE, 4));
+	}
+
+	/**
 	 * Returns a view distance up to the currently-allowed limit.
 	 */
 	public function getAllowedViewDistance(int $distance) : int{
@@ -915,8 +924,9 @@ class Server{
 					ServerProperties::DEFAULT_WORLD_GENERATOR => "DEFAULT",
 					ServerProperties::ENABLE_QUERY => true,
 					ServerProperties::AUTO_SAVE => true,
-					ServerProperties::VIEW_DISTANCE => self::DEFAULT_MAX_VIEW_DISTANCE,
-					ServerProperties::XBOX_AUTH => true,
+ServerProperties::VIEW_DISTANCE => self::DEFAULT_MAX_VIEW_DISTANCE,
+				ServerProperties::SIMULATION_DISTANCE => 4,
+				ServerProperties::XBOX_AUTH => true,
 					ServerProperties::LANGUAGE => "eng"
 				])
 			);

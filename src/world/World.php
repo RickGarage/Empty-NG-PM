@@ -573,7 +573,7 @@ class World implements ChunkManager{
 
 		$this->time = $this->provider->getWorldData()->getTime();
 
-		$this->chunkTickRadius = min($this->server->getViewDistance(), max(0, $cfg->getPropertyInt(YmlServerProperties::CHUNK_TICKING_TICK_RADIUS, 4)));
+		$this->chunkTickRadius = min($this->server->getViewDistance(), $this->server->getSimulationDistance(), max(0, $cfg->getPropertyInt(YmlServerProperties::CHUNK_TICKING_TICK_RADIUS, 4)));
 		if($cfg->getPropertyInt("chunk-ticking.per-tick", 40) <= 0){
 			//TODO: this needs l10n
 			$this->logger->warning("\"chunk-ticking.per-tick\" setting is deprecated, but you've used it to disable chunk ticking. Set \"chunk-ticking.tick-radius\" to 0 in \"pocketmine.yml\" instead.");
@@ -949,6 +949,26 @@ class World implements ChunkManager{
 				unset($this->chunkLoaders[$chunkHash][$loaderId]);
 			}
 		}
+	}
+
+	/**
+	 * Forces a chunk to remain loaded until the server is shut down.
+	 * This is useful for plugins that need chunks permanently loaded
+	 * (e.g., minigame arenas, persistent spawners, etc.).
+	 *
+	 * @param int $chunkX Chunk X coordinate
+	 * @param int $chunkZ Chunk Z coordinate
+	 * @param \Closure|object $loader A ChunkLoader instance (or closures/object treated as loaders);
+	 *                          if not provided, a simple anonymous loader is used
+	 */
+	public function forceLoadChunk(int $chunkX, int $chunkZ, $loader = null) : void{
+		if($loader === null){
+			$loader = function(){};
+		}
+		if(!is_object($loader)){
+			$loader = (object) $loader;
+		}
+		$this->registerChunkLoader($loader, $chunkX, $chunkZ, true);
 	}
 
 	/**
