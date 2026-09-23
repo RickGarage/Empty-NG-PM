@@ -384,6 +384,20 @@ class World implements ChunkManager{
 
 	private int $chunkTickRadius;
 	private int $tickedBlocksPerSubchunkPerTick = self::DEFAULT_TICKED_BLOCKS_PER_SUBCHUNK_PER_TICK;
+
+	/**
+	 * Chunks that have had no players or items for a while and are candidates for unloading.
+	 *
+	 * @phpstan-var list<ChunkPosHash>
+	 */
+	private array $chunksToUnload = [];
+
+	/**
+	 * Tracks when each chunk in $chunksToUnload was last checked.
+	 *
+	 * @phpstan-var array<ChunkPosHash, int>
+	 */
+	private array $chunksToUnloadLastCheck = [];
 	/**
 	 * @var true[]
 	 * @phpstan-var array<int, true>
@@ -1379,6 +1393,60 @@ class World implements ChunkManager{
 	}
 
 	/**
+	 * Returns whether the specified chunk has any players or entities (including items).
+	 * Used by the automatic chunk unloading system.
+	 */
+	public function hasPlayersOrEntitiesInChunk(int $chunkX, int $chunkZ) : bool{
+		$chunkHash = World::chunkHash($chunkX, $chunkZ);
+		$chunk = $this->chunks[$chunkHash] ?? null;
+		if($chunk === null){
+			return false;
+		}
+		//Check for entities in the chunk
+		foreach($this->getChunkEntities($chunkX, $chunkZ) as $entity){
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Attempts to unload chunks that have had no players or entities for a while.
+	 * Should be called each tick from Server::tick().
+	 * Chunks with no players or entities for 100 ticks (5 seconds) will be unloaded.
+	 */
+	private function tryAutoUnloadChunks() : void{
+		$chunksToUnload = [];
+		foreach($this->chunks as $chunkHash => $chunk){
+			//Check if chunk has any entities (including items)
+			$chunkX = (int) ($chunkHash >> 4);
+			$chunkZ = (int) ($chunkHash & 0xFFFF);
+			$hasEntities = !empty($this->getChunkEntities($chunkX, $chunkZ));
+			//Check if any player is in this chunk
+			$hasPlayers = false;
+			foreach($this->players as $player){
+				$playerChunkX = (int) ($player->x >> 4);
+				$playerChunkZ = (int) ($player->z >> 4);
+				if(World::chunkHash($playerChunkX, $playerChunkZ) === $chunkHash){
+					$hasPlayers = true;
+					break;
+				}
+			}
+			//If chunk has no players and no entities, mark for unloading
+			if(!$hasPlayers && !$hasEntities){
+				$chunksToUnload[$chunkHash] = true;
+			}
+		}
+		//Unload marked chunks
+		foreach($chunksToUnload as $chunkHash => $unused){
+			//Get chunk position
+			$chunk = $this->chunks[$chunkHash] ?? null;
+			if($chunk !== null){
+				$this->unloadChunkRequest(($chunkX = (int) ($chunkHash >> 4)), (int) ($chunkHash & 0xFFFF), true);
+			}
+		}
+	}
+
+	/**
 	 * Instructs the World to tick the specified chunk, for as long as this chunk ticker (or any other chunk ticker) is
 	 * registered to it.
 	 */
@@ -1412,6 +1480,8 @@ class World implements ChunkManager{
 		if($this->chunkTickRadius <= 0 || count($this->registeredTickingChunks) === 0){
 			return;
 		}
+
+		$this->tryAutoUnloadChunks();
 
 		if(count($this->recheckTickingChunks) > 0){
 			$this->timings->randomChunkUpdatesChunkSelection->startTiming();
