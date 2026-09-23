@@ -177,6 +177,7 @@ class World implements ChunkManager{
 	public const DIFFICULTY_HARD = 3;
 
 	public const DEFAULT_TICKED_BLOCKS_PER_SUBCHUNK_PER_TICK = 3;
+	public const MAX_CHUNKS_PER_TICK = 50;
 
 	//TODO: this could probably do with being a lot bigger
 	private const BLOCK_CACHE_SIZE_CAP = 2048;
@@ -1483,30 +1484,29 @@ class World implements ChunkManager{
 
 		$this->tryAutoUnloadChunks();
 
-		if(count($this->recheckTickingChunks) > 0){
-			$this->timings->randomChunkUpdatesChunkSelection->startTiming();
+		$chunksToTick = array_keys($this->validTickingChunks);
+		$maxSlicesPerTick = 2;
+		$sliceSize = max(1, (int) ceil(count($chunksToTick) / ($maxSlicesPerTick * 10)));
+		$tickCount = 0;
 
-			$chunkTickableCache = [];
-
-			foreach($this->recheckTickingChunks as $hash => $_){
+		foreach(array_chunk($chunksToTick, $sliceSize) as $slice){
+			foreach($slice as $hash){
 				World::getXZ($hash, $chunkX, $chunkZ);
-				if($this->isChunkTickable($chunkX, $chunkZ, $chunkTickableCache)){
-					$this->validTickingChunks[$hash] = $hash;
+				$this->tickChunk($chunkX, $chunkZ);
+				++$tickCount;
+				if($tickCount >= self::MAX_CHUNKS_PER_TICK){
+					break 2;
 				}
 			}
-			$this->recheckTickingChunks = [];
-
-			$this->timings->randomChunkUpdatesChunkSelection->stopTiming();
 		}
 
-		foreach($this->validTickingChunks as $index => $_){
-			World::getXZ($index, $chunkX, $chunkZ);
-
-			$this->tickChunk($chunkX, $chunkZ);
+if(count($this->validTickingChunks) > 0 && $tickCount >= self::MAX_CHUNKS_PER_TICK){
+			// Schedule remaining chunks for next tick
+			$this->recheckTickingChunks = $chunksToTick;
 		}
 	}
 
-	/**
+/**
 	 * @param bool[] &$cache
 	 *
 	 * @phpstan-param array<int, bool> $cache
