@@ -1415,7 +1415,20 @@ class World implements ChunkManager{
 	 * Should be called each tick from Server::tick().
 	 * Chunks with no players or entities for 100 ticks (5 seconds) will be unloaded.
 	 */
+	/**
+	 * Attempts to unload chunks that have had no players or entities for a while.
+	 * Should be called each tick from Server::tick().
+	 * Chunks with no players or entities for 30 minutes (6000 ticks at 20 TPS) will be unloaded.
+	 * Uses a counter to avoid checking all chunks every tick for performance.
+	 */
 	private function tryAutoUnloadChunks() : void{
+		static $checkCounter = 0;
+		$checkCounter++;
+		// Only re-check chunks every 6000 ticks (approx 30 minutes at 20 TPS)
+		if($checkCounter < 6000){
+			return;
+		}
+		$checkCounter = 0;
 		$chunksToUnload = [];
 		foreach($this->chunks as $chunkHash => $chunk){
 			//Check if chunk has any entities (including items)
