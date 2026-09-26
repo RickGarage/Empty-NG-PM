@@ -14,14 +14,26 @@ class SimpleForm extends Form implements \JsonSerializable {
 	private string $content = "";
 	private array $labelMap = [];
 	private array $buttons = [];
+	/** @var callable(Player $player)|null */
+	private $onCompletion;
 
-	public function __construct() {
+
+	public function __construct(?callable $onCompletion = null) {
 		parent::__construct(null);
 		$this->data["type"] = "form";
 		$this->data["title"] = "";
 		$this->data["content"] = "";
 		$this->data["buttons"] = [];
+		$this->onCompletion = $onCompletion;
 	}
+
+	/**
+	 * @return callable(Player $player)|null
+	 */
+	public function getOnCompletion() : ?callable{
+		return $this->onCompletion;
+	}
+
 
 	public function processData(&$data) : void {
 		if($data !== null) {
@@ -34,7 +46,12 @@ class SimpleForm extends Form implements \JsonSerializable {
 			}
 			$data = $this->labelMap[$data] ?? null;
 		}
+		// Call onCompletion after processing
+		if($this->onCompletion !== null) {
+			// Will be called from handleResponse
+		}
 	}
+
 
 	public function setTitle(string $title) : self {
 		$this->data["title"] = $title;
@@ -54,6 +71,7 @@ class SimpleForm extends Form implements \JsonSerializable {
 		return $this->data["content"];
 	}
 
+
 	public function addButton(string $text, int $imageType = -1, string $imagePath = "", ?string $label = null) : self {
 		$content = ["text" => $text];
 		if($imageType !== -1) {
@@ -64,6 +82,7 @@ class SimpleForm extends Form implements \JsonSerializable {
 		$this->labelMap[] = $label ?? count($this->labelMap);
 		return $this;
 	}
+
 
 	public function jsonSerialize() : array {
 		return $this->data;

@@ -2293,10 +2293,18 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			return false;
 		}
 
+		$form = $this->forms[$formId];
 		try{
-			$this->forms[$formId]->handleResponse($this, $responseData);
+			$form->handleResponse($this, $responseData);
+			// Call onCompletion callback if set
+			if($form instanceof \pocketmine\form\Form && method_exists($form, "getOnCompletion")){
+				$onCompletion = $form->getOnCompletion();
+				if(is_callable($onCompletion)){
+					$onCompletion($this);
+				}
+			}
 		}catch(FormValidationException $e){
-			$this->logger->critical("Failed to validate form " . get_class($this->forms[$formId]) . ": " . $e->getMessage());
+			$this->logger->critical("Failed to validate form " . get_class($form) . ": " . $e->getMessage());
 			$this->logger->logException($e);
 		}finally{
 			unset($this->forms[$formId]);

@@ -10,13 +10,25 @@ class CustomForm extends Form implements \JsonSerializable {
 
 	private array $labelMap = [];
 	private array $validationMethods = [];
+	/** @var callable(Player $player)|null */
+	private $onCompletion;
 
-	public function __construct() {
+
+	public function __construct(?callable $onCompletion = null) {
 		parent::__construct(null);
 		$this->data["type"] = "custom_form";
 		$this->data["title"] = "";
 		$this->data["content"] = [];
+		$this->onCompletion = $onCompletion;
 	}
+
+	/**
+	 * @return callable(Player $player)|null
+	 */
+	public function getOnCompletion() : ?callable{
+		return $this->onCompletion;
+	}
+
 
 	public function processData(&$data) : void {
 		if($data !== null && !is_array($data)) {
@@ -39,7 +51,12 @@ class CustomForm extends Form implements \JsonSerializable {
 			}
 			$data = $new;
 		}
+		// Call onCompletion after processing
+		if($this->onCompletion !== null) {
+			// We'll call it from handleResponse instead
+		}
 	}
+
 
 	public function setTitle(string $title) : self {
 		$this->data["title"] = $title;
@@ -57,6 +74,7 @@ class CustomForm extends Form implements \JsonSerializable {
 		return $this;
 	}
 
+
 	public function addToggle(string $text, bool $default = null, ?string $label = null) : self {
 		$content = ["type" => "toggle", "text" => $text];
 		if($default !== null) {
@@ -67,6 +85,7 @@ class CustomForm extends Form implements \JsonSerializable {
 		$this->validationMethods[] = static fn($v) => is_bool($v);
 		return $this;
 	}
+
 
 	public function addSlider(string $text, int $min, int $max, int $step = -1, int $default = -1, ?string $label = null) : self {
 		$content = ["type" => "slider", "text" => $text, "min" => $min, "max" => $max];
@@ -82,6 +101,7 @@ class CustomForm extends Form implements \JsonSerializable {
 		return $this;
 	}
 
+
 	public function addStepSlider(string $text, array $steps, int $defaultIndex = -1, ?string $label = null) : self {
 		$content = ["type" => "step_slider", "text" => $text, "steps" => $steps];
 		if($defaultIndex !== -1) {
@@ -93,12 +113,14 @@ class CustomForm extends Form implements \JsonSerializable {
 		return $this;
 	}
 
+
 	public function addDropdown(string $text, array $options, int $default = null, ?string $label = null) : self {
 		$this->addContent(["type" => "dropdown", "text" => $text, "options" => $options, "default" => $default]);
 		$this->labelMap[] = $label ?? count($this->labelMap);
 		$this->validationMethods[] = static fn($v) => is_int($v) && isset($options[$v]);
 		return $this;
 	}
+
 
 	public function addInput(string $text, string $placeholder = "", $default = null, ?string $label = null) : self {
 		$this->addContent(["type" => "input", "text" => $text, "placeholder" => $placeholder, "default" => $default]);
@@ -107,10 +129,12 @@ class CustomForm extends Form implements \JsonSerializable {
 		return $this;
 	}
 
+
 	private function addContent(array $content) : self {
 		$this->data["content"][] = $content;
 		return $this;
 	}
+
 
 	public function jsonSerialize() : array {
 		return $this->data;

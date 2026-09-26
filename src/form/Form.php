@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine\form;
 
+use pocketmine\form\FormValidationException;
 use pocketmine\player\Player;
 
 /**
@@ -39,4 +40,11 @@ interface Form extends \JsonSerializable{
 	 * @throws FormValidationException if the data could not be processed
 	 */
 	public function handleResponse(Player $player, $data) : void;
+
+	/**
+	 * Gets the on completion callback for this form.
+	 *
+	 * @return callable(Player $player)|null
+	 */
+	public function getOnCompletion() : ?callable;
 }
