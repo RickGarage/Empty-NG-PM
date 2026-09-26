@@ -11,9 +11,15 @@ class ModalForm extends Form implements \JsonSerializable {
 	private string $content = "";
 	/** @var callable(Player $player)|null */
 	private $onCompletion;
+	/** @var int|null */
+	private $maxRetries;
+	/** @var string|null */
+	private $kickMessage;
+	/** @var bool */
+	private $blocking;
 
 
-	public function __construct(?callable $onCompletion = null) {
+	public function __construct(?callable $onCompletion = null, ?int $maxRetries = null, ?string $kickMessage = null, bool $blocking = false) {
 		parent::__construct(null);
 		$this->data["type"] = "modal";
 		$this->data["title"] = "";
@@ -21,23 +27,15 @@ class ModalForm extends Form implements \JsonSerializable {
 		$this->data["button1"] = "";
 		$this->data["button2"] = "";
 		$this->onCompletion = $onCompletion;
-	}
-
-	/**
-	 * @return callable(Player $player)|null
-	 */
-	public function getOnCompletion() : ?callable{
-		return $this->onCompletion;
+		$this->maxRetries = $maxRetries;
+		$this->kickMessage = $kickMessage;
+		$this->blocking = $blocking;
 	}
 
 
 	public function processData(&$data) : void {
 		if(!is_bool($data)) {
 			throw new FormValidationException("Expected a boolean response, got " . gettype($data));
-		}
-		// Call onCompletion after processing
-		if($this->onCompletion !== null) {
-			// Will be called from handleResponse
 		}
 	}
 
@@ -78,6 +76,32 @@ class ModalForm extends Form implements \JsonSerializable {
 		return $this->data["button2"];
 	}
 
+	public function getMaxRetries() : ?int {
+		return $this->maxRetries;
+	}
+
+	public function setMaxRetries(?int $maxRetries) : self {
+		$this->maxRetries = $maxRetries;
+		return $this;
+	}
+
+	public function getKickMessage() : ?string {
+		return $this->kickMessage;
+	}
+
+	public function setKickMessage(?string $kickMessage) : self {
+		$this->kickMessage = $kickMessage;
+		return $this;
+	}
+
+	public function isBlocking() : bool {
+		return $this->blocking;
+	}
+
+	public function setBlocking(bool $blocking) : self {
+		$this->blocking = $blocking;
+		return $this;
+	}
 
 	public function jsonSerialize() : array {
 		return $this->data;

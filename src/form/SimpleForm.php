@@ -16,22 +16,24 @@ class SimpleForm extends Form implements \JsonSerializable {
 	private array $buttons = [];
 	/** @var callable(Player $player)|null */
 	private $onCompletion;
+	/** @var int|null */
+	private $maxRetries;
+	/** @var string|null */
+	private $kickMessage;
+	/** @var bool */
+	private $blocking;
 
 
-	public function __construct(?callable $onCompletion = null) {
+	public function __construct(?callable $onCompletion = null, ?int $maxRetries = null, ?string $kickMessage = null, bool $blocking = false) {
 		parent::__construct(null);
 		$this->data["type"] = "form";
 		$this->data["title"] = "";
 		$this->data["content"] = "";
 		$this->data["buttons"] = [];
 		$this->onCompletion = $onCompletion;
-	}
-
-	/**
-	 * @return callable(Player $player)|null
-	 */
-	public function getOnCompletion() : ?callable{
-		return $this->onCompletion;
+		$this->maxRetries = $maxRetries;
+		$this->kickMessage = $kickMessage;
+		$this->blocking = $blocking;
 	}
 
 
@@ -45,10 +47,6 @@ class SimpleForm extends Form implements \JsonSerializable {
 				throw new FormValidationException("Button $data does not exist");
 			}
 			$data = $this->labelMap[$data] ?? null;
-		}
-		// Call onCompletion after processing
-		if($this->onCompletion !== null) {
-			// Will be called from handleResponse
 		}
 	}
 
@@ -83,6 +81,32 @@ class SimpleForm extends Form implements \JsonSerializable {
 		return $this;
 	}
 
+	public function getMaxRetries() : ?int {
+		return $this->maxRetries;
+	}
+
+	public function setMaxRetries(?int $maxRetries) : self {
+		$this->maxRetries = $maxRetries;
+		return $this;
+	}
+
+	public function getKickMessage() : ?string {
+		return $this->kickMessage;
+	}
+
+	public function setKickMessage(?string $kickMessage) : self {
+		$this->kickMessage = $kickMessage;
+		return $this;
+	}
+
+	public function isBlocking() : bool {
+		return $this->blocking;
+	}
+
+	public function setBlocking(bool $blocking) : self {
+		$this->blocking = $blocking;
+		return $this;
+	}
 
 	public function jsonSerialize() : array {
 		return $this->data;

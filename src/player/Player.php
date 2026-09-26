@@ -311,6 +311,12 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	private int $lastEmoteTick = 0;
 
 	protected int $formIdCounter = 0;
+	// Form auto-resend and retry features
+	private ?int $formRetryCounter = null;
+	private ?int $formMaxRetries = null;
+	private ?string $formKickMessage = null;
+	private ?bool $formBlocking = null;
+	private ?\DateTimeImmutable $formRetryTimer = null;
 	/** @var Form[] */
 	protected array $forms = [];
 
@@ -2306,11 +2312,50 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		}catch(FormValidationException $e){
 			$this->logger->critical("Failed to validate form " . get_class($form) . ": " . $e->getMessage());
 			$this->logger->logException($e);
-		}finally{
-			unset($this->forms[$formId]);
 		}
+		// Manage form retry logic (re-send or kick player)
+		$this->manageFormRetry($form);
+		// Clear the form from tracking
+		unset($this->forms[$formId]);
 
 		return true;
+	}
+
+	/**
+	 * Manages form retry logic - re-sends form if closed, kicks if max retries exceeded.
+	 */
+	private function manageFormRetry(Form $form) : void{
+		// If form max retries is not set, do nothing
+		if($this->formMaxRetries === null || $this->formMaxRetries <= 0){
+			return;
+		}
+		// If form retry timer is not set, initialize it
+		if($this->formRetryTimer === null){
+			$this->formRetryTimer = new \DateTimeImmutable();
+		}
+		// Check if 3 seconds have passed since form was closed/unsubmitted
+		$now = new \DateTimeImmutable();
+		$elapsed = $now->getTimestamp() - $this->formRetryTimer->getTimestamp();
+		if($elapsed >= 3){
+			// Increment retry counter
+			$this->formRetryCounter++;
+			// Check if max retries exceeded
+			if($this->formRetryCounter >= $this->formMaxRetries){
+				// Kick the player using the existing kick method with the kick message
+				// We use the first parameter as the reason
+				$this->kick($this->formKickMessage ?? "Form expired", null, null);
+				// Reset form tracking
+				$this->formRetryTimer = null;
+				$this->formMaxRetries = null;
+				$this->formKickMessage = null;
+				$this->formBlocking = null;
+				$this->forms = [];
+			}else{
+				// Re-send the form to the player
+				$this->formRetryTimer = new \DateTimeImmutable();
+				$this->sendForm($form);
+			}
+		}
 	}
 
 	/**

@@ -47,4 +47,57 @@ interface Form extends \JsonSerializable{
 	 * @return callable(Player $player)|null
 	 */
 	public function getOnCompletion() : ?callable;
+
+	/**
+	 * Gets the retry attempts setting for this form.
+	 * When the form is closed without submission, it will be re-sent up to this many times.
+	 * Set to null or 0 to disable auto-resend.
+	 *
+	 * @return int|null
+	 */
+	public function getMaxRetries() : ?int;
+
+	/**
+	 * Sets the max retries setting for this form.
+	 * When the form is closed without submission, it will be re-sent up to this many times.
+	 * Set to null or 0 to disable auto-resend.
+	 *
+	 * @param int|null $maxRetries
+	 * @return $this
+	 */
+	public function setMaxRetries(?int $maxRetries) : self;
+
+	/**
+	 * Gets the kick message for this form.
+	 * When max retries is exceeded, the player will be kicked with this message.
+	 *
+	 * @return string|null
+	 */
+	public function getKickMessage() : ?string;
+
+	/**
+	 * Sets the kick message for this form.
+	 * When max retries is exceeded, the player will be kicked with this message.
+	 *
+	 * @param string|null $kickMessage
+	 * @return $this
+	 */
+	public function setKickMessage(?string $kickMessage) : self;
+
+	/**
+	 * Gets whether this form blocks all player events.
+	 * When true, the player cannot interact with anything while the form is open.
+	 *
+	 * @return bool
+	 */
+	public function isBlocking() : bool;
+
+	/**
+	 * Sets whether this form blocks all player events.
+	 * When true, the player cannot interact with anything while the form is open.
+	 *
+	 * @param bool $blocking
+	 * @return $this
+	 */
+	public function setBlocking(bool $blocking) : self;
 }
