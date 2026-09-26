@@ -87,7 +87,9 @@ use pocketmine\plugin\PluginEnableOrder;
 use pocketmine\plugin\PluginGraylist;
 use pocketmine\plugin\PluginManager;
 use pocketmine\plugin\PluginOwned;
+use pocketmine\plugin\Plugin;
 use pocketmine\plugin\ScriptPluginLoader;
+use pocketmine\plugin\FolderPluginLoader;
 use pocketmine\promise\Promise;
 use pocketmine\promise\PromiseResolver;
 use pocketmine\resourcepacks\ResourcePackManager;
@@ -1120,8 +1122,9 @@ ServerProperties::VIEW_DISTANCE => self::DEFAULT_MAX_VIEW_DISTANCE,
 				return;
 			}
 			$this->pluginManager = new PluginManager($this, $this->configGroup->getPropertyBool(Yml::PLUGINS_LEGACY_DATA_DIR, true) ? null : Path::join($this->dataPath, "plugin_data"), $pluginGraylist);
-			$this->pluginManager->registerInterface(new PharPluginLoader($this->autoloader));
-			$this->pluginManager->registerInterface(new ScriptPluginLoader());
+$this->pluginManager->registerInterface(new PharPluginLoader($this->autoloader));
+		$this->pluginManager->registerInterface(new ScriptPluginLoader());
+		$this->pluginManager->registerInterface(new FolderPluginLoader($this->autoloader));
 
 			$providerManager = new WorldProviderManager();
 			if(
