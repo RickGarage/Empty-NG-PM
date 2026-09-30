@@ -312,11 +312,20 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 
 	protected int $formIdCounter = 0;
 	// Form auto-resend and retry features
-	private ?int $formRetryCounter = null;
+	/** Number of times in a row the player has closed a form without submitting a response. */
+	private int $formRetryCounter = 0;
+	/** Fallback max retries used for forms which don't specify their own via {@link Form::getMaxRetries()}. */
 	private ?int $formMaxRetries = null;
+	/** Fallback kick message used for forms which don't specify their own via {@link Form::getKickMessage()}. */
 	private ?string $formKickMessage = null;
-	private ?bool $formBlocking = null;
+	/** Whether the form currently open for this player is marked as blocking. */
+	private bool $formBlocking = false;
+	/** Timestamp from which the currently pending auto-resend delay is measured. */
 	private ?\DateTimeImmutable $formRetryTimer = null;
+	/** The form waiting to be automatically re-sent once the retry delay elapses. */
+	private ?Form $pendingRetryForm = null;
+	/** Seconds to wait before automatically re-sending a form that was closed without a response. */
+	private const FORM_RETRY_DELAY_SECONDS = 3;
 	/** @var Form[] */
 	protected array $forms = [];
 
@@ -1566,6 +1575,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			}
 		}
 
+		if($this->formRetryTimer !== null){
+			$this->tickFormRetry();
+		}
+
 		$this->timings->stopTiming();
 
 		return true;
@@ -2290,6 +2303,19 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$id = $this->formIdCounter++;
 		if($this->getNetworkSession()->onFormSent($id, $form)){
 			$this->forms[$id] = $form;
+			$this->formBlocking = $form->isBlocking();
+		}
+	}
+
+	/**
+	 * Re-sends a form without resetting any pending retry/kick tracking. Used internally by the auto-resend
+	 * mechanism; plugins should use {@link self::sendForm()} instead.
+	 */
+	private function resendForm(Form $form) : void{
+		$id = $this->formIdCounter++;
+		if($this->getNetworkSession()->onFormSent($id, $form)){
+			$this->forms[$id] = $form;
+			$this->formBlocking = $form->isBlocking();
 		}
 	}
 
@@ -2300,62 +2326,144 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		}
 
 		$form = $this->forms[$formId];
+		unset($this->forms[$formId]);
+
+		if($responseData === null){
+			//The player closed the form without submitting a response - handle auto-resend/kick tracking.
+			$this->manageFormRetry($form);
+			return true;
+		}
+
+		//The player successfully submitted a response, so any pending retry/kick tracking is no longer relevant.
+		$this->clearFormRetryState();
+
 		try{
 			$form->handleResponse($this, $responseData);
-			// Call onCompletion callback if set
-			if($form instanceof \pocketmine\form\Form && method_exists($form, "getOnCompletion")){
-				$onCompletion = $form->getOnCompletion();
-				if(is_callable($onCompletion)){
-					$onCompletion($this);
-				}
+
+			$onCompletion = $form->getOnCompletion();
+			if($onCompletion !== null){
+				$onCompletion($this);
 			}
 		}catch(FormValidationException $e){
 			$this->logger->critical("Failed to validate form " . get_class($form) . ": " . $e->getMessage());
 			$this->logger->logException($e);
 		}
-		// Manage form retry logic (re-send or kick player)
-		$this->manageFormRetry($form);
-		// Clear the form from tracking
-		unset($this->forms[$formId]);
 
 		return true;
 	}
 
 	/**
-	 * Manages form retry logic - re-sends form if closed, kicks if max retries exceeded.
+	 * Manages form retry logic. Called when a form is closed without a response.
+	 * If the form (or the player's fallback settings) has a max retry count configured, this increments the
+	 * retry counter and either kicks the player (if the max has been exceeded) or schedules the form to be
+	 * automatically re-sent after {@link self::FORM_RETRY_DELAY_SECONDS}.
 	 */
 	private function manageFormRetry(Form $form) : void{
-		// If form max retries is not set, do nothing
-		if($this->formMaxRetries === null || $this->formMaxRetries <= 0){
+		$maxRetries = $form->getMaxRetries() ?? $this->formMaxRetries;
+		if($maxRetries === null || $maxRetries <= 0){
+			//Auto-resend/kick is disabled for this form.
 			return;
 		}
-		// If form retry timer is not set, initialize it
-		if($this->formRetryTimer === null){
-			$this->formRetryTimer = new \DateTimeImmutable();
+
+		$this->formMaxRetries = $maxRetries;
+		$this->formKickMessage = $form->getKickMessage() ?? $this->formKickMessage;
+		$this->formRetryCounter++;
+
+		if($this->formRetryCounter >= $maxRetries){
+			$kickMessage = $this->formKickMessage ?? "You did not respond to a required form in time";
+			$this->clearFormRetryState();
+			$this->kick($kickMessage, null, null);
+			return;
 		}
-		// Check if 3 seconds have passed since form was closed/unsubmitted
-		$now = new \DateTimeImmutable();
-		$elapsed = $now->getTimestamp() - $this->formRetryTimer->getTimestamp();
-		if($elapsed >= 3){
-			// Increment retry counter
-			$this->formRetryCounter++;
-			// Check if max retries exceeded
-			if($this->formRetryCounter >= $this->formMaxRetries){
-				// Kick the player using the existing kick method with the kick message
-				// We use the first parameter as the reason
-				$this->kick($this->formKickMessage ?? "Form expired", null, null);
-				// Reset form tracking
-				$this->formRetryTimer = null;
-				$this->formMaxRetries = null;
-				$this->formKickMessage = null;
-				$this->formBlocking = null;
-				$this->forms = [];
-			}else{
-				// Re-send the form to the player
-				$this->formRetryTimer = new \DateTimeImmutable();
-				$this->sendForm($form);
-			}
+
+		//Give the player a short break before the form is shown again.
+		$this->pendingRetryForm = $form;
+		$this->formRetryTimer = new \DateTimeImmutable();
+	}
+
+	/**
+	 * Called every tick to check whether a form pending auto-resend is due to be shown again.
+	 */
+	private function tickFormRetry() : void{
+		if($this->formRetryTimer === null || $this->pendingRetryForm === null){
+			return;
 		}
+		if(!$this->isConnected()){
+			$this->clearFormRetryState();
+			return;
+		}
+
+		$elapsed = (new \DateTimeImmutable())->getTimestamp() - $this->formRetryTimer->getTimestamp();
+		if($elapsed < self::FORM_RETRY_DELAY_SECONDS){
+			return;
+		}
+
+		$form = $this->pendingRetryForm;
+		$this->pendingRetryForm = null;
+		$this->formRetryTimer = null;
+		$this->resendForm($form);
+	}
+
+	/**
+	 * Resets all form auto-resend/kick tracking, e.g. after the player successfully submits a form.
+	 */
+	private function clearFormRetryState() : void{
+		$this->formRetryCounter = 0;
+		$this->formMaxRetries = null;
+		$this->formKickMessage = null;
+		$this->formBlocking = false;
+		$this->formRetryTimer = null;
+		$this->pendingRetryForm = null;
+	}
+
+	/**
+	 * Returns the fallback max retry count applied to forms that don't specify their own via
+	 * {@link Form::getMaxRetries()}.
+	 */
+	public function getFormMaxRetries() : ?int{
+		return $this->formMaxRetries;
+	}
+
+	/**
+	 * Sets the fallback max retry count applied to forms that don't specify their own via
+	 * {@link Form::getMaxRetries()}.
+	 */
+	public function setFormMaxRetries(?int $maxRetries) : void{
+		$this->formMaxRetries = $maxRetries;
+	}
+
+	/**
+	 * Returns the fallback kick message used when the player fails to respond to a form within the allowed
+	 * number of retries, for forms that don't specify their own via {@link Form::getKickMessage()}.
+	 */
+	public function getFormKickMessage() : ?string{
+		return $this->formKickMessage;
+	}
+
+	/**
+	 * Sets the fallback kick message used when the player fails to respond to a form within the allowed number
+	 * of retries, for forms that don't specify their own via {@link Form::getKickMessage()}.
+	 */
+	public function setFormKickMessage(?string $kickMessage) : void{
+		$this->formKickMessage = $kickMessage;
+	}
+
+	/**
+	 * Returns whether the form currently open for this player is marked as blocking.
+	 *
+	 * This is an advisory flag only - the core packet-handling pipeline does not enforce it. Plugins that want
+	 * to prevent player actions while a blocking form is open should check this in their own event handlers
+	 * (e.g. PlayerMoveEvent, PlayerInteractEvent) and cancel the event when it returns true.
+	 */
+	public function isFormBlocking() : bool{
+		return $this->formBlocking;
+	}
+
+	/**
+	 * Overrides whether the currently open form is treated as blocking. See {@link self::isFormBlocking()}.
+	 */
+	public function setFormBlocking(bool $blocking) : void{
+		$this->formBlocking = $blocking;
 	}
 
 	/**
@@ -2371,6 +2479,8 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 */
 	public function closeAllForms() : void{
 		$this->getNetworkSession()->onCloseAllForms();
+		$this->forms = [];
+		$this->clearFormRetryState();
 	}
 
 	/**
@@ -2470,6 +2580,8 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 
 		$this->stopSleep();
 		$this->blockBreakHandler = null;
+		$this->forms = [];
+		$this->clearFormRetryState();
 		$this->despawnFromAll();
 
 		$this->server->removeOnlinePlayer($this);

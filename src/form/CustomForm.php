@@ -6,7 +6,10 @@ namespace pocketmine\form;
 use pocketmine\form\FormValidationException;
 use pocketmine\player\Player;
 
-class CustomForm extends Form implements \JsonSerializable {
+class CustomForm implements Form {
+
+	/** @var array<string, mixed> */
+	protected array $data = [];
 
 	private array $labelMap = [];
 	private array $validationMethods = [];
@@ -21,7 +24,6 @@ class CustomForm extends Form implements \JsonSerializable {
 
 
 	public function __construct(?callable $onCompletion = null, ?int $maxRetries = null, ?string $kickMessage = null, bool $blocking = false) {
-		parent::__construct(null);
 		$this->data["type"] = "custom_form";
 		$this->data["title"] = "";
 		$this->data["content"] = [];
@@ -29,6 +31,26 @@ class CustomForm extends Form implements \JsonSerializable {
 		$this->maxRetries = $maxRetries;
 		$this->kickMessage = $kickMessage;
 		$this->blocking = $blocking;
+	}
+
+	/**
+	 * Validates and normalizes the raw response data.
+	 * Subclasses which need access to the submitted answers should override {@link self::handleResponse()}
+	 * and call parent::handleResponse() first to benefit from this validation.
+	 *
+	 * @throws FormValidationException if the data could not be processed
+	 */
+	public function handleResponse(Player $player, $data) : void {
+		$this->processData($data);
+	}
+
+	public function getOnCompletion() : ?callable {
+		return $this->onCompletion;
+	}
+
+	public function setOnCompletion(?callable $onCompletion) : self {
+		$this->onCompletion = $onCompletion;
+		return $this;
 	}
 
 
